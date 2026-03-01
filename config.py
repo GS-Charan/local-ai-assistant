@@ -15,10 +15,10 @@ MEMORY_DIR.mkdir(exist_ok=True)
 
 # Ollama Configuration
 OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_MODEL = "gemma-3-12b-it:latest"  # You'll create this from your GGUF
+OLLAMA_MODEL = "dolphin-phi3-medium:latest"  # Dolphin Phi-3 Medium - uncensored & conversational
 
 # Model Configuration
-CONVERSATION_MODEL = "gemma-3-12b-it:latest"  # Main chat model
+CONVERSATION_MODEL = "dolphin-phi3-medium:latest"  # Main chat model
 SUMMARY_MODEL = "falcon3-7b"  # For summarization (Phase 2)
 VISION_MODEL = "joycaption"  # For image analysis (Phase 3)
 

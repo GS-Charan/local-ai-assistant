@@ -61,13 +61,13 @@ class OllamaHandler:
         except Exception as e:
             yield f"Error communicating with Ollama: {str(e)}\n\nMake sure Ollama is running and the model is loaded."
     
-    def _build_messages(self, message: str, history: List[tuple] = None) -> List:
+    def _build_messages(self, message: str, history: List = None) -> List:
         """
         Build message list for LangChain
         
         Args:
             message: Current user message
-            history: Previous conversation history
+            history: Previous conversation history (Gradio 5.x messages format or tuples)
         
         Returns:
             List of message objects
@@ -78,11 +78,22 @@ class OllamaHandler:
         if history:
             # Take only recent history to avoid context overflow
             recent_history = history[-config.MAX_CONVERSATION_HISTORY:]
-            for user_msg, assistant_msg in recent_history:
-                if user_msg:
-                    messages.append(HumanMessage(content=user_msg))
-                if assistant_msg:
-                    messages.append(AIMessage(content=assistant_msg))
+            
+            for item in recent_history:
+                # Handle both Gradio 5.x messages format and legacy tuple format
+                if isinstance(item, dict):
+                    # Gradio 5.x format: {"role": "user"/"assistant", "content": "..."}
+                    if item.get("role") == "user":
+                        messages.append(HumanMessage(content=item["content"]))
+                    elif item.get("role") == "assistant":
+                        messages.append(AIMessage(content=item["content"]))
+                elif isinstance(item, (list, tuple)) and len(item) == 2:
+                    # Legacy format: (user_msg, assistant_msg)
+                    user_msg, assistant_msg = item
+                    if user_msg:
+                        messages.append(HumanMessage(content=user_msg))
+                    if assistant_msg:
+                        messages.append(AIMessage(content=assistant_msg))
         
         # Add current message
         messages.append(HumanMessage(content=message))
