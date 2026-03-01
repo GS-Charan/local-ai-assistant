@@ -1,14 +1,17 @@
-# Core dependencies
-gradio==4.44.0
-langchain==0.3.7
-langchain-community==0.3.5
-langchain-ollama==0.2.0
+# Core dependencies (will install latest versions)
+gradio
+langchain
+langchain-community
+langchain-ollama
 
 # Utilities
-python-dotenv==1.0.0
-requests==2.31.0
+python-dotenv
+requests
+
+# Required for Gradio compatibility
+huggingface_hub==0.26.2
 
 # Future phases (optional for now)
-# pillow==10.1.0  # For screen capture
-# pyaudio==0.2.14  # For voice
+# pillow  # For screen capture
+# pyaudio  # For voice
 # piper-tts  # For text-to-speech
