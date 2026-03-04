@@ -3,6 +3,7 @@ gradio
 langchain
 langchain-community
 langchain-ollama
+chromadb
 
 # Utilities
 python-dotenv
