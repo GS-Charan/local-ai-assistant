@@ -20,7 +20,7 @@ summarizer = ConversationSummarizer()
 
 def chat_response(message: str, history: list):
     """
-    Handle chat messages with streaming + auto fact extraction
+    Handle chat messages with streaming + auto fact extraction + RAG retrieval
     
     Args:
         message: User's message
@@ -30,9 +30,20 @@ def chat_response(message: str, history: list):
         Streaming response chunks
     """
     try:
-        # Stream the response
+        # PHASE 2: Retrieve relevant facts from ChromaDB before responding
+        relevant_context = memory.get_relevant_context(message)
+        
+        # If we have relevant memories, prepend them to history
+        enhanced_history = history.copy() if history else []
+        if relevant_context:
+            # Add context as a system-like message at the start
+            context_message = f"[Relevant memories about user: {relevant_context}]"
+            # Insert at beginning so AI sees it
+            enhanced_history.insert(0, (context_message, "Understood, I'll keep that in mind."))
+        
+        # Stream the response with enhanced context
         final_response = ""
-        for partial_response in llm_handler.chat_stream(message, history):
+        for partial_response in llm_handler.chat_stream(message, enhanced_history):
             final_response = partial_response
             yield partial_response
         
@@ -70,13 +81,26 @@ def extract_and_store_facts():
     # Store each fact (with contradiction check)
     for fact in facts:
         check = fact_extractor.check_contradiction(fact, existing_facts)
+        
         if check['action'] == 'add':
             memory.add_user_fact(fact, category="auto_extracted")
             print(f"✓ Stored: {fact}")
+            
         elif check['action'] == 'update':
-            print(f"⚠ Contradiction detected: {fact} vs {check['conflicting_fact']}")
-            # For now, store anyway with note (you can improve this later)
-            memory.add_user_fact(f"[Updated] {fact}", category="auto_extracted")
+            print(f"⚠ Contradiction: '{fact}' conflicts with '{check['conflicting_fact']}'")
+            
+            # Delete the old conflicting fact
+            deleted = memory.delete_fact_by_content(check['conflicting_fact'])
+            if deleted:
+                print(f"  → Deleted old fact")
+            
+            # Store the new one
+            memory.add_user_fact(fact, category="auto_extracted")
+            print(f"✓ Stored updated fact: {fact}")
+        else:
+            # Ignore
+            print(f"⊝ Skipped: {fact} (not meaningful)")
+
 
 
 def auto_summarize():
@@ -200,7 +224,7 @@ if __name__ == "__main__":
     print("🚀 Starting Local AI Assistant...")
     print(f"📍 Running on http://localhost:{config.GRADIO_SERVER_PORT}")
     print(f"🤖 Model: {config.CONVERSATION_MODEL}")
-    print(f"💾 Memory file: {config.MEMORY_FILE}")
+    print(f"💾 ChromaDB: {config.CHROMA_DB_DIR}")
     print("\n" + "="*50)
     
     # Launch the app

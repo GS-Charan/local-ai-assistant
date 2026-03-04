@@ -27,22 +27,28 @@ class FactExtractor:
         Returns:
             List of facts (e.g., ["loves Python", "prefers dark mode"])
         """
-        prompt = f"""Extract ONLY factual statements about the user from this conversation.
-Return each fact as a simple statement, one per line.
-Focus on: interests, preferences, beliefs, habits, skills.
-Ignore: greetings, questions, temporary states.
+        prompt = f"""Extract ONLY meaningful, non-obvious facts about the user from this conversation.
+
+RULES:
+- Skip obvious statements (e.g., "User's name is [Name]" - we already know their name)
+- Focus on: interests, preferences, beliefs, habits, skills, dislikes
+- Ignore: greetings, questions, temporary states, self-evident facts
+- Be concise: "loves Python" not "User loves Python programming"
+- One fact per line
 
 Conversation:
 {conversation_text}
 
-Facts (one per line):"""
+Meaningful facts (one per line):"""
 
-        messages = [SystemMessage(content="You extract facts concisely."), HumanMessage(content=prompt)]
+        messages = [SystemMessage(content="You extract only meaningful facts concisely."), HumanMessage(content=prompt)]
         
         try:
             response = self.llm.invoke(messages)
             # Split by newlines and clean
-            facts = [f.strip() for f in response.content.split('\n') if f.strip() and not f.startswith('#')]
+            facts = [f.strip() for f in response.content.split('\n') if f.strip() and not f.startswith('#') and not f.startswith('-')]
+            # Filter out very short or meaningless facts
+            facts = [f for f in facts if len(f) > 10]
             return facts[:5]  # Max 5 facts per extraction
         except Exception as e:
             print(f"Fact extraction error: {e}")

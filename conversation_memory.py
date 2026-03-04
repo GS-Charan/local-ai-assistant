@@ -229,6 +229,25 @@ class ConversationMemory:
         """Clear current session (keeps long-term memory)"""
         self.current_session = []
     
+    def delete_fact_by_content(self, fact_content: str):
+        """
+        Delete a specific fact by its content
+        
+        Args:
+            fact_content: The fact text to delete
+        """
+        # Get all facts
+        all_facts = self.facts_collection.get()
+        
+        # Find matching fact
+        for i, doc in enumerate(all_facts['documents']):
+            if fact_content.lower() in doc.lower():
+                fact_id = all_facts['ids'][i]
+                self.facts_collection.delete(ids=[fact_id])
+                print(f"🗑️  Deleted old fact: {doc}")
+                return True
+        return False
+    
     def clear_all_memory(self):
         """⚠️ DANGER: Delete all stored memories (cannot be undone!)"""
         self.client.delete_collection("user_facts")
