@@ -1,117 +1,112 @@
 """
-Conversation Memory Manager
-Handles short-term (session) and long-term (persistent) memory
+Conversation Memory Manager - ChromaDB Version
+Simple vector-based memory for semantic search and smart fact storage
 """
 
-import json
+import chromadb
 from datetime import datetime
-from pathlib import Path
 from typing import List, Dict, Optional
 import config
 
 
 class ConversationMemory:
     def __init__(self):
-        """Initialize memory system"""
-        self.memory_file = config.MEMORY_FILE
+        """Initialize ChromaDB-based memory system"""
+        # Create ChromaDB client
+        self.client = chromadb.PersistentClient(path=str(config.CHROMA_DB_DIR))
+        
+        # Get or create collections
+        self.facts_collection = self.client.get_or_create_collection(
+            name="user_facts",
+            metadata={"description": "Facts about the user"}
+        )
+        
+        self.conversations_collection = self.client.get_or_create_collection(
+            name="conversation_history",
+            metadata={"description": "Past conversation summaries"}
+        )
+        
+        # Current session (in-memory, not persisted)
         self.current_session = []
-        self.long_term_facts = self._load_long_term_memory()
-    
-    def _load_long_term_memory(self) -> Dict:
-        """Load persistent memory from disk"""
-        if self.memory_file.exists():
-            try:
-                with open(self.memory_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except json.JSONDecodeError:
-                print("Warning: Could not load memory file. Starting fresh.")
-                return self._initialize_memory_structure()
-        else:
-            return self._initialize_memory_structure()
-    
-    def _initialize_memory_structure(self) -> Dict:
-        """Create initial memory structure"""
-        return {
-            "user_facts": {},  # Key facts about the user
-            "conversation_summaries": [],  # Past conversation summaries
-            "created_at": datetime.now().isoformat(),
-            "last_updated": datetime.now().isoformat()
-        }
-    
-    def save_long_term_memory(self):
-        """Save memory to disk"""
-        self.long_term_facts["last_updated"] = datetime.now().isoformat()
-        with open(self.memory_file, 'w', encoding='utf-8') as f:
-            json.dump(self.long_term_facts, f, indent=2, ensure_ascii=False)
     
     def add_message(self, user_msg: str, assistant_msg: str):
-        """Add a message pair to current session"""
+        """
+        Add a message pair to current session
+        
+        Args:
+            user_msg: User's message
+            assistant_msg: Assistant's response
+        """
         self.current_session.append({
             "user": user_msg,
             "assistant": assistant_msg,
             "timestamp": datetime.now().isoformat()
         })
     
-    def get_conversation_history(self) -> List[tuple]:
+    def add_user_fact(self, fact: str, category: str = "general"):
         """
-        Get conversation history in Gradio format
-        
-        Returns:
-            List of (user_message, assistant_message) tuples
-        """
-        return [(msg["user"], msg["assistant"]) for msg in self.current_session]
-    
-    def get_recent_context(self, num_messages: int = None) -> str:
-        """
-        Get recent conversation as text context
+        Store a fact about the user in ChromaDB
         
         Args:
-            num_messages: Number of recent message pairs to include
-        
-        Returns:
-            Formatted conversation context
-        """
-        num = num_messages or config.MAX_CONVERSATION_HISTORY
-        recent = self.current_session[-num:] if len(self.current_session) > num else self.current_session
-        
-        context = []
-        for msg in recent:
-            context.append(f"User: {msg['user']}")
-            context.append(f"Assistant: {msg['assistant']}")
-        
-        return "\n".join(context)
-    
-    def add_user_fact(self, category: str, key: str, value: str):
-        """
-        Store a fact about the user
-        
-        Args:
+            fact: The fact to store (e.g., "loves Python programming")
             category: Category like 'interests', 'beliefs', 'preferences'
-            key: Specific fact key
-            value: Fact value
         """
-        if category not in self.long_term_facts["user_facts"]:
-            self.long_term_facts["user_facts"][category] = {}
+        fact_id = f"{category}_{datetime.now().timestamp()}"
         
-        self.long_term_facts["user_facts"][category][key] = {
-            "value": value,
-            "updated_at": datetime.now().isoformat()
-        }
-        self.save_long_term_memory()
+        self.facts_collection.add(
+            documents=[fact],
+            metadatas=[{
+                "category": category,
+                "created_at": datetime.now().isoformat()
+            }],
+            ids=[fact_id]
+        )
     
-    def get_user_facts(self, category: Optional[str] = None) -> Dict:
+    def search_facts(self, query: str, n_results: int = 5) -> List[str]:
         """
-        Retrieve user facts
+        Search for relevant facts using semantic similarity
         
         Args:
-            category: Optional category filter
+            query: Natural language query
+            n_results: Number of results to return
         
         Returns:
-            User facts dictionary
+            List of relevant facts
         """
-        if category:
-            return self.long_term_facts["user_facts"].get(category, {})
-        return self.long_term_facts["user_facts"]
+        if self.facts_collection.count() == 0:
+            return []
+        
+        results = self.facts_collection.query(
+            query_texts=[query],
+            n_results=min(n_results, self.facts_collection.count())
+        )
+        
+        if results['documents'] and len(results['documents']) > 0:
+            return results['documents'][0]
+        return []
+    
+    def get_all_facts(self) -> List[Dict]:
+        """
+        Get all stored facts
+        
+        Returns:
+            List of facts with metadata
+        """
+        if self.facts_collection.count() == 0:
+            return []
+        
+        results = self.facts_collection.get()
+        
+        facts = []
+        if results['documents']:
+            for i, doc in enumerate(results['documents']):
+                facts.append({
+                    "fact": doc,
+                    "category": results['metadatas'][i].get('category', 'general'),
+                    "created_at": results['metadatas'][i].get('created_at', 'unknown')
+                })
+        
+        return facts
     
     def add_conversation_summary(self, summary: str):
         """
@@ -120,61 +115,167 @@ class ConversationMemory:
         Args:
             summary: Text summary of conversation
         """
-        self.long_term_facts["conversation_summaries"].append({
-            "summary": summary,
-            "created_at": datetime.now().isoformat()
-        })
-        self.save_long_term_memory()
+        summary_id = f"summary_{datetime.now().timestamp()}"
+        
+        self.conversations_collection.add(
+            documents=[summary],
+            metadatas=[{"created_at": datetime.now().isoformat()}],
+            ids=[summary_id]
+        )
+    
+    def search_past_conversations(self, query: str, n_results: int = 3) -> List[str]:
+        """
+        Search past conversation summaries
+        
+        Args:
+            query: What to search for
+            n_results: Number of results
+        
+        Returns:
+            List of relevant conversation summaries
+        """
+        if self.conversations_collection.count() == 0:
+            return []
+        
+        results = self.conversations_collection.query(
+            query_texts=[query],
+            n_results=min(n_results, self.conversations_collection.count())
+        )
+        
+        if results['documents'] and len(results['documents']) > 0:
+            return results['documents'][0]
+        return []
+    
+    def get_conversation_history(self) -> List[tuple]:
+        """
+        Get current session history in Gradio format
+        
+        Returns:
+            List of (user_message, assistant_message) tuples
+        """
+        return [(msg["user"], msg["assistant"]) for msg in self.current_session]
     
     def get_memory_context(self) -> str:
         """
-        Get relevant long-term memory as context for the LLM
+        Get formatted memory context for display
         
         Returns:
-            Formatted memory context
+            Formatted memory string
         """
         context_parts = []
         
-        # Add user facts
-        if self.long_term_facts["user_facts"]:
+        # Get all facts grouped by category
+        all_facts = self.get_all_facts()
+        
+        if all_facts:
             context_parts.append("=== What I know about you ===")
-            for category, facts in self.long_term_facts["user_facts"].items():
-                context_parts.append(f"\n{category.title()}:")
-                for key, data in facts.items():
-                    context_parts.append(f"  - {key}: {data['value']}")
+            
+            # Group by category
+            categories = {}
+            for fact_data in all_facts:
+                category = fact_data['category']
+                if category not in categories:
+                    categories[category] = []
+                categories[category].append(fact_data['fact'])
+            
+            # Format by category
+            for category, facts in categories.items():
+                context_parts.append(f"\n**{category.title()}:**")
+                for fact in facts:
+                    context_parts.append(f"  • {fact}")
         
-        # Add recent conversation summaries
-        if self.long_term_facts["conversation_summaries"]:
-            recent_summaries = self.long_term_facts["conversation_summaries"][-3:]
-            context_parts.append("\n=== Recent conversation summaries ===")
-            for summary in recent_summaries:
-                context_parts.append(f"- {summary['summary']}")
+        # Get recent conversation summaries
+        all_summaries = self.conversations_collection.get()
+        if all_summaries['documents']:
+            # Get last 3 summaries
+            recent = all_summaries['documents'][-3:] if len(all_summaries['documents']) > 3 else all_summaries['documents']
+            if recent:
+                context_parts.append("\n=== Recent Conversations ===")
+                for summary in recent:
+                    context_parts.append(f"  • {summary}")
         
-        return "\n".join(context_parts) if context_parts else "No previous memory."
+        return "\n".join(context_parts) if context_parts else "No memories stored yet."
+    
+    def get_relevant_context(self, current_message: str) -> str:
+        """
+        Get relevant memories based on current message
+        This is what gets sent to the LLM for context
+        
+        Args:
+            current_message: The user's current message
+        
+        Returns:
+            Relevant context string
+        """
+        relevant_parts = []
+        
+        # Search for relevant facts
+        relevant_facts = self.search_facts(current_message, n_results=5)
+        if relevant_facts:
+            relevant_parts.append("Relevant facts about user:")
+            for fact in relevant_facts:
+                relevant_parts.append(f"- {fact}")
+        
+        # Search for relevant past conversations
+        relevant_convos = self.search_past_conversations(current_message, n_results=2)
+        if relevant_convos:
+            relevant_parts.append("\nRelevant past discussions:")
+            for convo in relevant_convos:
+                relevant_parts.append(f"- {convo}")
+        
+        return "\n".join(relevant_parts) if relevant_parts else ""
     
     def clear_session(self):
-        """Clear current session (for new conversation)"""
+        """Clear current session (keeps long-term memory)"""
+        self.current_session = []
+    
+    def clear_all_memory(self):
+        """⚠️ DANGER: Delete all stored memories (cannot be undone!)"""
+        self.client.delete_collection("user_facts")
+        self.client.delete_collection("conversation_history")
+        
+        # Recreate empty collections
+        self.facts_collection = self.client.get_or_create_collection(name="user_facts")
+        self.conversations_collection = self.client.get_or_create_collection(name="conversation_history")
         self.current_session = []
     
     def get_stats(self) -> Dict:
         """Get memory statistics"""
         return {
             "current_session_messages": len(self.current_session),
-            "total_user_facts": sum(len(facts) for facts in self.long_term_facts["user_facts"].values()),
-            "conversation_summaries": len(self.long_term_facts["conversation_summaries"]),
-            "memory_file_exists": self.memory_file.exists()
+            "total_user_facts": self.facts_collection.count(),
+            "conversation_summaries": self.conversations_collection.count(),
+            "chromadb_location": str(config.CHROMA_DB_DIR)
         }
 
 
+# Simple usage example
 if __name__ == "__main__":
-    # Test memory system
+    # Test the memory system
     memory = ConversationMemory()
-    print("Memory stats:", memory.get_stats())
     
-    # Test adding a fact
-    memory.add_user_fact("interests", "programming", "Loves Python and AI")
-    print("\nUser facts:", memory.get_user_facts())
+    print("Testing ChromaDB Memory System\n")
     
-    # Test memory context
-    print("\nMemory context:")
-    print(memory.get_memory_context())
+    # Add some facts
+    print("Adding facts...")
+    memory.add_user_fact("Loves Python programming", category="interests")
+    memory.add_user_fact("Prefers dark mode", category="preferences")
+    memory.add_user_fact("Learning AI and machine learning", category="interests")
+    
+    # Search for facts
+    print("\nSearching for 'programming':")
+    results = memory.search_facts("programming")
+    for fact in results:
+        print(f"  - {fact}")
+    
+    # Get stats
+    print("\nMemory stats:")
+    stats = memory.get_stats()
+    for key, value in stats.items():
+        print(f"  {key}: {value}")
+    
+    # Show all facts
+    print("\nAll stored facts:")
+    all_facts = memory.get_all_facts()
+    for fact_data in all_facts:
+        print(f"  [{fact_data['category']}] {fact_data['fact']}")

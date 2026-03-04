@@ -8,10 +8,11 @@ from pathlib import Path
 # Project paths
 BASE_DIR = Path(__file__).parent
 MEMORY_DIR = BASE_DIR / "memory"
-MEMORY_FILE = MEMORY_DIR / "memory_store.json"
+CHROMA_DB_DIR = MEMORY_DIR / "chromadb"  # Vector database storage
 
 # Ensure directories exist
 MEMORY_DIR.mkdir(exist_ok=True)
+CHROMA_DB_DIR.mkdir(exist_ok=True)
 
 # Ollama Configuration
 OLLAMA_BASE_URL = "http://localhost:11434"
